@@ -1,7 +1,5 @@
 {
   "dependencies": {
-    "fast-xml-parser": "^5.11.1",
-    "hono": "^4.13.7",
-    "linkedom": "^0.18.13"
+    "fast-xml-parser": "^5.11.1"
   }
 }
