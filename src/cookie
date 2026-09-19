@@ -1,0 +1,222 @@
+import { Hono } from 'hono'
+import { parseHTML } from 'linkedom'
+
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+const DAY = 86_400_000
+const MAX_PAGES = 10
+
+type Item = { id?: string; title: string; link: string; ts: number }
+type Snapshot = { fetchedAt: number; items: Item[] }
+type Source = { slug: string; base: string; origin: string }
+type Env = { KV: KVNamespace; PUZO_COOKIE?: string; PUZO_USER?: string; PUZO_PASS?: string }
+
+const SOURCES: Source[] = [
+  { slug: 'puzo-muzik',      base: 'https://puzo.org/index.php?forums/muzik-links.15/',       origin: 'https://puzo.org' },
+  { slug: 'puzo-audiobooks', base: 'https://puzo.org/index.php?forums/audio-books-links.36/', origin: 'https://puzo.org' },
+]
+
+const threadId = (url: string) => url.match(/(?:\.|\/threads\/|^)(\d+)(?:\/|[?#]|$)/)?.[1]
+const esc = (t: string) => t.replace(/[&<>"']/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]!))
+const ago = (ts: number) => {
+  const m = Math.round((Date.now() - ts) / 60_000)
+  return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.floor(m / 60)}h ago` : `${Math.floor(m / 1440)}d ago`
+}
+
+// ---------- scraping ----------
+
+async function walkXfHtml(s: Source, known: Set<string>, cookie?: string): Promise<Item[]> {
+  const out: Item[] = []
+  const cutoff = Date.now() - DAY
+
+  for (let p = 1; p <= MAX_PAGES; p++) {
+    const url = p === 1 ? s.base : `${s.base}page-${p}`
+    const res = await fetch(url, {
+      headers: { 'User-Agent': UA, ...(cookie ? { Cookie: cookie } : {}) },
+      cf: { cacheTtl: 0 },
+    })
+    if (!res.ok) break
+
+    const html = await res.text()
+    const { document } = parseHTML(html)
+    const rows = [...document.querySelectorAll('.structItem--thread, .js-threadList .structItem, .structItemContainer .structItem')]
+    if (!rows.length) break
+
+    let allOld = true
+    let hitKnown = false
+
+    for (const el of rows) {
+      if (el.classList.contains('structItem--sticky') || el.classList.contains('is-sticky')) continue
+
+      const a = el.querySelector('.structItem-title a[href*="threads/"]') ??
+                el.querySelector('.structItem-title a:not(.labelLink):not(.label)')
+      if (!a) continue
+
+      const href = a.getAttribute('href') ?? ''
+      const id = threadId(href)
+      if (id && known.has(id)) {
+        hitKnown = true
+        break
+      }
+
+      const timeEl = el.querySelector('.structItem-startDate time, time[data-time], time[data-timestamp], time[datetime]')
+      const rawSec = timeEl?.getAttribute('data-time') ?? timeEl?.getAttribute('data-timestamp')
+      const ts = rawSec ? Number(rawSec) * 1000 : (Date.parse(timeEl?.getAttribute('datetime') ?? '') || 0)
+
+      if (ts >= cutoff) {
+        allOld = false
+        out.push({
+          id,
+          title: a.textContent?.trim() ?? '(untitled)',
+          link: new URL(href, s.origin).toString(),
+          ts,
+        })
+      }
+    }
+
+    if (hitKnown || allOld) break
+  }
+  return out
+}
+
+// ---------- refresh ----------
+
+async function mergeSnapshot(kv: KVNamespace, slug: string, fresh: Item[]) {
+  const old = await kv.get<Snapshot>(`f:${slug}`, 'json')
+  const cutoff = Date.now() - DAY
+  const merged = new Map<string, Item>()
+
+  for (const i of [...(old?.items ?? []), ...fresh]) {
+    if (i.ts >= cutoff) merged.set(i.id ?? i.link, i)
+  }
+
+  await kv.put(
+    `f:${slug}`,
+    JSON.stringify({ fetchedAt: Date.now(), items: [...merged.values()].sort((a, b) => b.ts - a.ts) }),
+    { expirationTtl: 7 * 86_400 }
+  )
+}
+
+async function refreshSource(env: Env, s: Source) {
+  const cookie = (await env.KV.get<string>('puzo:cookie')) ?? env.PUZO_COOKIE
+  const snap = await env.KV.get<Snapshot>(`f:${s.slug}`, 'json')
+  const known = new Set((snap?.items ?? []).map(i => i.id).filter(Boolean) as string[])
+
+  const items = await walkXfHtml(s, known, cookie)
+  await mergeSnapshot(env.KV, s.slug, items)
+  return items.length
+}
+
+// ---------- app & routes ----------
+
+const app = new Hono<{ Bindings: Env }>()
+
+// Home page
+app.get('/', (c) =>
+  c.html(
+    `<meta charset="utf-8"><title>Feeds</title>` +
+    `<h2>Feeds</h2><ul>` +
+    SOURCES.map(s => `<li><a href="/f/${esc(s.slug)}">${esc(s.slug)}</a></li>`).join('') +
+    `</ul><hr><p>Debug: <a href="/debug/html">/debug/html</a> | <a href="/debug/xf">/debug/xf</a> | <a href="/debug/refresh">/debug/refresh</a></p>`
+  )
+)
+
+// Feed viewer (supports both /f/:slug and /f/:slug/)
+app.get('/f/:slug', async (c) => {
+  const rawSlug = c.req.param('slug').replace(/\/+$/, '')
+  const source = SOURCES.find(s => s.slug === rawSlug)
+  if (!source) return c.text(`Unknown source "${rawSlug}". Available: ${SOURCES.map(s => s.slug).join(', ')}`, 404)
+
+  let snap = await c.env.KV.get<Snapshot>(`f:${rawSlug}`, 'json')
+
+  // Cold start: auto-fetch on first hit
+  if (!snap) {
+    await refreshSource(c.env, source)
+    snap = await c.env.KV.get<Snapshot>(`f:${rawSlug}`, 'json')
+  }
+
+  const fresh = (snap?.items ?? []).filter(i => Date.now() - i.ts < DAY)
+  if (!fresh.length) {
+    return c.html(
+      `<meta charset="utf-8"><title>${esc(rawSlug)}</title>` +
+      `<p>Nothing in the last 24h.</p>` +
+      `<p><small>Last checked: ${snap?.fetchedAt ? ago(snap.fetchedAt) : 'never'}. ` +
+      `<a href="/debug/refresh">Run refresh</a> | <a href="/debug/html">Inspect Forum HTML</a></small></p>`
+    )
+  }
+
+  return c.html(
+    `<meta charset="utf-8"><title>${esc(rawSlug)}</title>` +
+    `<p><small>Updated: ${ago(snap!.fetchedAt)} (${fresh.length} threads in last 24h)</small></p><ul>` +
+    fresh.map(i =>
+      `<li style="margin:8px 0">` +
+      `<a href="${esc(i.link)}" target="_blank">${esc(i.title)}</a> <small style="color:#666">${ago(i.ts)}</small>` +
+      `</li>`
+    ).join('') +
+    `</ul>`
+  )
+})
+
+// Debug: Inspect HTML structure and parsed threads
+app.get('/debug/html', async (c) => {
+  const cookie = (await c.env.KV.get<string>('puzo:cookie')) ?? c.env.PUZO_COOKIE
+  const target = 'https://puzo.org/index.php?forums/muzik-links.15/'
+  const res = await fetch(target, {
+    headers: { 'User-Agent': UA, ...(cookie ? { Cookie: cookie } : {}) },
+    cf: { cacheTtl: 0 },
+  })
+
+  const html = await res.text()
+  const { document } = parseHTML(html)
+  const rows = [...document.querySelectorAll('.structItem--thread, .structItemContainer .structItem, .js-threadList .structItem')]
+
+  const samples = rows.slice(0, 3).map(el => {
+    const a = el.querySelector('.structItem-title a[href*="threads/"]') ?? el.querySelector('.structItem-title a')
+    const timeEl = el.querySelector('.structItem-startDate time, time[data-time], time[data-timestamp], time')
+    const rawSec = timeEl?.getAttribute('data-time') ?? timeEl?.getAttribute('data-timestamp')
+    const ts = rawSec ? Number(rawSec) * 1000 : (Date.parse(timeEl?.getAttribute('datetime') ?? '') || 0)
+    return {
+      title: a?.textContent?.trim(),
+      href: a?.getAttribute('href'),
+      timeRaw: timeEl?.getAttribute('data-time') ?? timeEl?.getAttribute('datetime') ?? timeEl?.textContent?.trim(),
+      parsedDate: ts ? new Date(ts).toISOString() : null,
+      isSticky: el.classList.contains('structItem--sticky'),
+    }
+  })
+
+  return c.json({
+    httpStatus: res.status,
+    cookieSet: !!cookie,
+    isLoggedIn: html.includes('data-logged-in="true"') || html.includes('/account/') || html.includes('p-navgroup-link--user'),
+    structItemRowsCount: rows.length,
+    firstThreeItems: samples,
+  })
+})
+
+// Debug: Legacy RSS probe
+app.get('/debug/xf', async (c) => {
+  const cookie = (await c.env.KV.get<string>('puzo:cookie')) ?? c.env.PUZO_COOKIE
+  const res = await fetch('https://puzo.org/index.php?forums/muzik-links.15/index.rss', {
+    headers: { 'User-Agent': UA, ...(cookie ? { Cookie: cookie } : {}) }, cf: { cacheTtl: 0 },
+  })
+  const text = await res.text()
+  return c.text(`status=${res.status} items=${(text.match(/<item>/g) ?? []).length} bytes=${text.length} cookieSet=${!!cookie}`)
+})
+
+// Debug: Trigger immediate refresh
+app.get('/debug/refresh', async (c) => {
+  const results = await Promise.allSettled(SOURCES.map(s => refreshSource(c.env, s)))
+  return c.json(results.map(r => (r.status === 'fulfilled' ? `ok (added ${r.value} items)` : String(r.reason))))
+})
+
+// Catch-all 404 helper
+app.notFound((c) => {
+  return c.text(`Route not found: ${c.req.path}\nAvailable routes:\n- /\n- /f/puzo-muzik\n- /f/puzo-audiobooks\n- /debug/html\n- /debug/xf\n- /debug/refresh`, 404)
+})
+app.get('/ping', (c) => c.text('pong v2'))
+
+export default {
+  fetch: app.fetch,
+  async scheduled(_, env: Env) {
+    await Promise.allSettled(SOURCES.map(s => refreshSource(env, s)))
+  },
+} satisfies ExportedHandler<Env>

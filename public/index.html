@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0f0f0f">
+<title>Reader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  :root{
+    --bg:#0f0f0f;
+    --line:#1e1e1e;
+    --line-soft:#181818;
+    --teal:#3f97a3;
+    --ink:#e9e9e7;
+    --ink-2:#a8a8a6;
+    --ink-3:#6e6e6c;
+  }
+  html,body{height:100%}
+  body{
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+    overflow-y:scroll;
+  }
+  button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+  a{color:inherit;text-decoration:none}
+  :focus-visible{outline:2px solid var(--teal);outline-offset:3px;border-radius:6px}
+
+  .wrap{max-width:720px;margin:0 auto;padding:0 24px 96px}
+
+  /* ---------- toolbar ---------- */
+  .toolbar{
+    display:flex;align-items:center;gap:6px;
+    padding:28px 0 24px;flex-wrap:wrap;
+    position:sticky;top:0;z-index:10;
+    background:linear-gradient(to bottom, var(--bg) 75%, transparent);
+  }
+  .tab{
+    padding:8px 14px;border-radius:8px;
+    font-size:14.5px;font-weight:500;
+    transition:background .12s,color .12s;
+    white-space:nowrap;color:var(--ink-3);
+    display:inline-flex;align-items:baseline;gap:7px;
+  }
+  .tab:hover{background:#181818;color:var(--ink-2)}
+  .tab.active{color:var(--ink)}
+  .tab.active .count{color:var(--teal)}
+  .tab .count{font-variant-numeric:tabular-nums;font-size:12.5px;opacity:.7;font-weight:600}
+
+  /* ---------- list ---------- */
+  .list{display:flex;flex-direction:column}
+
+  .row{
+    display:flex;
+    gap:24px;
+    align-items:flex-start;
+    padding:24px 0;
+    border-bottom:1px solid var(--line-soft);
+    transition:opacity .12s;
+  }
+  .row:first-child{border-top:1px solid var(--line-soft)}
+  .row:hover .title{color:#bfe6ec}
+  .row:hover .thumb img{opacity:.85}
+
+  .row .body{flex:1;min-width:0}
+
+  .title{
+    font-size:19px;
+    font-weight:600;
+    letter-spacing:-.012em;
+    line-height:1.32;
+    color:var(--ink);
+    margin-bottom:8px;
+    transition:color .12s;
+  }
+
+  .meta{
+    display:flex;align-items:center;gap:9px;
+    font-size:13.5px;color:var(--ink-3);
+  }
+  .avatar{
+    width:17px;height:17px;border-radius:50%;
+    flex:none;display:flex;align-items:center;justify-content:center;
+    font-weight:700;font-size:7.5px;letter-spacing:.02em;
+    color:#0b0b0b;text-transform:uppercase;
+  }
+  .meta .sep{opacity:.6}
+
+  .thumb{
+    width:108px;
+    height:72px;
+    flex:0 0 108px;
+    border-radius:6px;
+    overflow:hidden;
+    background:#161616;
+    align-self:center;
+  }
+  .thumb img{
+    width:100%;height:100%;object-fit:cover;display:block;
+    transition:opacity .12s;
+  }
+
+  /* ---------- empty ---------- */
+  .empty{padding:120px 20px;text-align:center;color:var(--ink-3)}
+  .empty strong{color:var(--ink);display:block;margin-bottom:8px;font-size:16px;font-weight:600}
+
+  @media (max-width:560px){
+    .wrap{padding:0 16px 60px}
+    .title{font-size:16.5px}
+    .row{gap:16px;padding:20px 0}
+    .thumb{width:88px;height:60px;flex:0 0 88px}
+    .tab{padding:7px 11px;font-size:13.5px}
+    .toolbar{padding:18px 0 16px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="toolbar" id="toolbar"></header>
+  <main class="list" id="list"></main>
+</div>
+
+<script>
+(() => {
+  const listEl    = document.getElementById('list');
+  const toolbarEl = document.getElementById('toolbar');
+
+  let allItems = [];
+  let activeCat = 'all';
+
+  const el = (tag, attrs, children) => {
+    const n = document.createElement(tag);
+    if (attrs) for (const [k, v] of Object.entries(attrs)) {
+      if (v === false || v == null) continue;
+      if (k === 'class') n.className = v; else n.setAttribute(k, v);
+    }
+    if (children != null) {
+      if (typeof children === 'string') n.textContent = children;
+      else for (const c of [].concat(children)) {
+        if (c == null) continue;
+        n.append(typeof c === 'string' ? document.createTextNode(c) : c);
+      }
+    }
+    return n;
+  };
+
+  const initials = (name) => {
+    const s = (name || '').trim();
+    if (!s) return '?';
+    const words = s.split(/\s+/);
+    if (words.length === 1) return s.slice(0, 2);
+    return (words[0][0] + words[1][0]).toUpperCase();
+  };
+
+  const timeAgo = (ts) => {
+    const d = Math.max(0, Date.now() - ts);
+    const m = Math.floor(d / 60000);
+    if (m < 1) return 'just now';
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    const days = Math.floor(h / 24);
+    if (days < 7) return days + 'd ago';
+    return new Date(ts).toLocaleDateString(undefined, { day:'numeric', month:'short' });
+  };
+
+  const avatarFor = (name) => {
+    const a = el('span', { class: 'avatar' });
+    a.textContent = initials(name);
+    let h = 0; for (const ch of (name || '')) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    a.style.background = `hsl(${h % 360} 40% 55%)`;
+    return a;
+  };
+
+  function renderToolbar() {
+    const counts = new Map();
+    counts.set('all', allItems.length);
+    for (const it of allItems) {
+      const c = it.category || 'general';
+      counts.set(c, (counts.get(c) || 0) + 1);
+    }
+    const cats = ['all', ...[...counts.keys()].filter(k => k !== 'all').sort()];
+
+    toolbarEl.replaceChildren(...cats.map(c => {
+      const t = el('button', { class: 'tab' + (c === activeCat ? ' active' : ''), type: 'button' }, [
+        el('span', {}, c),
+        el('span', { class: 'count' }, String(counts.get(c) || 0)),
+      ]);
+      t.addEventListener('click', () => {
+        activeCat = c;
+        renderToolbar();
+        renderList();
+      });
+      return t;
+    }));
+  }
+
+  function visibleItems() {
+    return allItems.filter(it => activeCat === 'all' || (it.category || 'general') === activeCat);
+  }
+
+  function renderList() {
+    const items = visibleItems();
+    if (!items.length) {
+      listEl.replaceChildren(
+        el('div', { class: 'empty' }, [
+          el('strong', {}, 'Nothing here'),
+          el('span', {}, 'No items in this view within the last 24 hours.'),
+        ])
+      );
+      return;
+    }
+    listEl.replaceChildren(...items.map(renderRow));
+  }
+
+  function renderRow(it) {
+    const body = el('div', { class: 'body' }, [
+      el('h2', { class: 'title' }, it.title || '(untitled)'),
+      el('div', { class: 'meta' }, [
+        avatarFor(it.feed),
+        el('span', {}, it.feed || ''),
+        el('span', { class: 'sep' }, '·'),
+        el('span', {}, timeAgo(it.pubDate)),
+      ]),
+    ]);
+
+    const row = el('a', {
+      class: 'row',
+      href: it.link,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    }, [body]);
+
+    if (it.image) {
+      const img = el('img', {
+        src: it.image,
+        loading: 'lazy',
+        alt: '',
+        referrerpolicy: 'no-referrer',
+      });
+      const t = el('div', { class: 'thumb' }, [img]);
+      img.addEventListener('error', () => t.remove());
+      row.append(t);
+    }
+
+    return row;
+  }
+
+  async function load() {
+    try {
+      const r = await fetch('/api/items', { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      allItems = (data.items || []).slice().sort((a, b) => b.pubDate - a.pubDate);
+      renderToolbar();
+      renderList();
+    } catch (e) {
+      listEl.replaceChildren(
+        el('div', { class: 'empty' }, [
+          el('strong', {}, 'Could not reach the API'),
+          el('span', {}, String(e.message || e)),
+        ])
+      );
+    }
+  }
+
+  load();
+  setInterval(load, 5 * 60 * 1000);
+})();
+</script>
+</body>
+</html>
