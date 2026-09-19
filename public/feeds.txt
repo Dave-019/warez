@@ -4,4 +4,4 @@ science | Naked Science      | https://naked-science.ru/?yandex_feed=news
 books   | RapidLinks Books   | https://rapidlinks.org/rss/?cat=8
 docu    | MVGroup Docs       | https://www.limetorrents.fun/searchrss/mvgroup/
 movies  | RapidLinks Movies  | https://rapidlinks.org/rss/?cat=4
-Tut  | RapidLinks Music   | https://www.limetorrents.fun/searchrss/WebToolTip/
+Tut     |  tuts              | https://www.limetorrents.fun/searchrss/WebToolTip/
