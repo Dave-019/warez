@@ -3,5 +3,9 @@ science | Habr Articles      | https://habr.com/ru/rss/articles/?fl=ru
 science | Naked Science      | https://naked-science.ru/?yandex_feed=news
 books   | RapidLinks Books   | https://rapidlinks.org/rss/?cat=8
 docu    | MVGroup Docs       | https://www.limetorrents.fun/searchrss/mvgroup/
-movies  | RapidLinks Movies  | https://rapidlinks.org/rss/?cat=4
-Tut     |  tuts              | https://www.limetorrents.fun/searchrss/WebToolTip/
+Tut     | tuts               | https://www.limetorrents.fun/searchrss/WebToolTip/
+scripts | scripts            | https://scriptzhub.com/en/forums/-/index.rss
+babaito | babaito            | https://babia.to/forums/-/index.rss
+vulns   | vulnsider          | https://vuinsider.com/forums/-/index.rss
+
+

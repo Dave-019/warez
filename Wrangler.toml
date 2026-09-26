@@ -2,13 +2,23 @@ name = "feedpeek"
 main = "src/index.js"
 compatibility_date = "2025-01-01"
 
+routes = [
+  { pattern = "warez.roma.co.ke", custom_domain = true, zone_name = "roma.co.ke" }
+]
+
+[vars]
+REFRESH_TOKEN = "REFRESH_TOKEN"
+
 [triggers]
 crons = ["0 */2 * * *"]
+
 
 [assets]
 directory = "./public"
 binding = "ASSETS"
 
+
 [[kv_namespaces]]
 binding = "RSS_KV"
 id = "1d1c68689ee246e0a567500bec485a60"
+
