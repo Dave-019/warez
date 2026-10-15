@@ -1,11 +1,16 @@
 # format: category | name | url
 science | Habr Articles      | https://habr.com/ru/rss/articles/?fl=ru
 science | Naked Science      | https://naked-science.ru/?yandex_feed=news
-books   | RapidLinks Books   | https://rapidlinks.org/rss/?cat=8
 docu    | MVGroup Docs       | https://www.limetorrents.fun/searchrss/mvgroup/
 Tut     | tuts               | https://www.limetorrents.fun/searchrss/WebToolTip/
-scripts | scripts            | https://scriptzhub.com/en/forums/-/index.rss
-babaito | babaito            | https://babia.to/forums/-/index.rss
-vulns   | vulnsider          | https://vuinsider.com/forums/-/index.rss
+scripts | scriptshubz        | https://scriptzhub.com/en/forums/-/index.rss
+scripts | babaito            | https://babia.to/forums/-/index.rss
+scripts | nullphpscript      | https://nullphpscript.com/feed/
+scripts | htmlup4vn          | https://up4vn.com/rss-feeds/feed/category/html
+scripts | codeup4vn          | https://up4vn.com/rss-feeds/feed/author/codecanyon
+scripts | PHPup4vn           | https://up4vn.com/rss-feeds/feed/category/scripts
+movies  | subversiverabbit   | https://subversiverabbit.com/feed/
+movies  | underratedmovies   | https://www.reddit.com/r/underratedmovies/.rss
+
 
 
